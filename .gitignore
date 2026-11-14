@@ -1,0 +1,16 @@
+node_modules/
+dist/
+coverage/
+k6/results/*.json
+!k6/results/.gitkeep
+
+# Segredos e configuração local
+.env
+.env.*
+!.env.example
+
+*.log
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

@@ -1,0 +1,49 @@
+{
+  "name": "h2vsense-alerts-api",
+  "version": "1.0.0",
+  "description": "API de ingestão de leituras de sensores de H2 e gestão de alertas de vazamento (H2VSENSE)",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc -p tsconfig.build.json && node -e \"require('fs').cpSync('src/infra/db/migrations','dist/infra/db/migrations',{recursive:true})\"",
+    "start": "node dist/server.js",
+    "migrate": "tsx src/infra/db/migrate.ts",
+    "migrate:prod": "node dist/infra/db/migrate.js",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
+    "test:coverage": "vitest run --coverage"
+  },
+  "author": "Ednardo Pinheiro Peixoto",
+  "license": "MIT",
+  "dependencies": {
+    "dotenv": "^18.0.9",
+    "express": "^5.3.0",
+    "pg": "^8.23.1",
+    "pino": "^10.4.0",
+    "pino-http": "^11.0.0",
+    "prom-client": "^15.1.3",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.6.6",
+    "@types/pg": "^8.23.1",
+    "@types/supertest": "^7.2.1",
+    "@vitest/coverage-v8": "^5.1.0",
+    "eslint": "^10.14.0",
+    "globals": "^17.14.0",
+    "pino-pretty": "^13.2.0",
+    "supertest": "^7.3.2",
+    "tsx": "^4.23.15",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.72.1",
+    "vitest": "^5.1.0"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  }
+}

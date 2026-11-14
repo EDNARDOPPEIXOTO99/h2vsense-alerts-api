@@ -1,0 +1,2 @@
+# Evita CRLF do Windows quebrar scripts e o Dockerfile.
+* text=auto eol=lf
