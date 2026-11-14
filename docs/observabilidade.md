@@ -56,3 +56,24 @@ sum(rate(http_request_duration_seconds_count{route="/readings",method="POST",sta
 ```
 
 O mesmo alvo está como `threshold` no smoke test k6 (`p(95)<200`), então o teste falha se o SLO for violado. Resultado medido em [`desempenho.md`](desempenho.md).
+
+## Como eu verifico no Prometheus
+
+```powershell
+docker compose --profile observability down -v   # banco e métricas zerados
+docker compose --profile observability up -d
+k6 run k6/smoke.js                               # gera tráfego por 30 s
+```
+
+1. Abro `http://localhost:9090` → **Status → Target health**: o alvo `h2vsense-alerts-api` (`http://api:3000/metrics`) aparece **UP**.
+2. Na aba **Query**, rodo as consultas abaixo (**Execute**; a aba **Graph** mostra a curva):
+
+| Consulta | O que mostra |
+|---|---|
+| `h2_readings_ingested_total` | leituras recebidas por severidade |
+| `h2_alerts_opened_total` | alertas **abertos** por severidade |
+| `histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{route="/readings"}[5m])) by (le))` | p95 do `POST /readings`, em segundos (0.009 = 9 ms) |
+
+O que observei em 2026-11-14 (Windows 11 + Docker Desktop): alvo UP; leituras separadas por `normal`, `attention` e `alarm`; e o p95 no gráfico em torno de **9 ms**, coerente com o k6.
+
+Detalhe que confirma a regra de negócio: `h2_alerts_opened_total` só sobe quando um alerta é **aberto**. Se o banco já tem um alerta aberto para o sensor, as leituras seguintes atualizam esse alerta e o contador não muda. Por isso o `down -v` antes do teste: sem ele, os 50 sensores do k6 já têm alerta aberto e o contador fica vazio.
