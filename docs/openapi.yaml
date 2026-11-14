@@ -1,0 +1,251 @@
+openapi: 3.1.0
+info:
+  title: H2VSENSE Alerts API
+  version: 1.0.0
+  description: |
+    Ingestão de leituras de sensores de hidrogênio (H2) e gestão de alertas de vazamento.
+
+    Classificação padrão por % do Limite Inferior de Explosividade (LIE) do H2 = 40.000 ppm:
+    - **normal**: < 4.000 ppm (< 10% LIE)
+    - **attention**: >= 4.000 ppm (10% LIE)
+    - **alarm**: >= 10.000 ppm (25% LIE)
+
+    Um sensor tem no máximo um alerta aberto. Leitura mais grave escala o alerta;
+    leitura normal não fecha o alerta: só o reconhecimento de um operador.
+  contact:
+    name: Ednardo Pinheiro Peixoto
+    url: https://github.com/EDNARDOPPEIXOTO99/h2vsense-alerts-api
+  license:
+    name: MIT
+    identifier: MIT
+servers:
+  - url: http://localhost:3000
+    description: Local (docker compose)
+tags:
+  - name: readings
+    description: Leituras dos sensores
+  - name: alerts
+    description: Alertas de vazamento
+  - name: ops
+    description: Saúde e métricas
+paths:
+  /readings:
+    post:
+      tags: [readings]
+      operationId: createReading
+      summary: Registra uma leitura e abre/atualiza o alerta do sensor
+      description: Fluxo principal. Coberto pelo SLO de latência (p95 < 200 ms).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateReadingRequest'
+            examples:
+              normal:
+                summary: Leitura normal
+                value: { sensorId: ELETROLISADOR-01, ppm: 800 }
+              alarme:
+                summary: Leitura de alarme
+                value: { sensorId: ELETROLISADOR-01, ppm: 13500, measuredAt: '2026-11-07T10:00:00-03:00' }
+      responses:
+        '201':
+          description: Leitura registrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateReadingResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '422':
+          description: Leitura viola regra de domínio (ex. data no futuro)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /alerts:
+    get:
+      tags: [alerts]
+      operationId: listAlerts
+      summary: Lista alertas, do mais recente para o mais antigo
+      description: Filtra por status e sensor. Painel do operador usa `status=open`.
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [open, acknowledged] }
+        - name: sensorId
+          in: query
+          schema: { type: string, maxLength: 64 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        '200':
+          description: Lista de alertas
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Alert'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+  /alerts/{id}/ack:
+    patch:
+      tags: [alerts]
+      operationId: acknowledgeAlert
+      summary: Operador reconhece o alerta
+      description: Única forma de encerrar um alerta. Registra quem reconheceu e quando.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [acknowledgedBy]
+              properties:
+                acknowledgedBy: { type: string, minLength: 1, maxLength: 100, examples: [operador.turno-a] }
+      responses:
+        '200':
+          description: Alerta reconhecido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Alert'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '404':
+          description: Alerta não encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Alerta já reconhecido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /health:
+    get:
+      tags: [ops]
+      operationId: health
+      summary: Saúde da API e do banco
+      description: Executa `SELECT 1` no Postgres. Usado pelo healthcheck do container.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, const: ok }
+        '503':
+          description: Banco indisponível
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, const: unavailable }
+  /metrics:
+    get:
+      tags: [ops]
+      operationId: metrics
+      summary: Métricas no formato Prometheus
+      description: Inclui `http_request_duration_seconds` (base do SLO) e `h2_alerts_opened_total`.
+      responses:
+        '200':
+          description: Métricas
+          content:
+            text/plain:
+              schema: { type: string }
+components:
+  schemas:
+    Severity:
+      type: string
+      enum: [normal, attention, alarm]
+    CreateReadingRequest:
+      type: object
+      required: [sensorId, ppm]
+      additionalProperties: false
+      properties:
+        sensorId:
+          type: string
+          minLength: 1
+          maxLength: 64
+          pattern: '^[A-Za-z0-9_.:-]+$'
+        ppm:
+          type: number
+          minimum: 0
+          maximum: 1000000
+          description: Concentração de H2 em partes por milhão
+        measuredAt:
+          type: string
+          format: date-time
+          description: Momento da medição (padrão = recebimento). Até 5 min no futuro é tolerado.
+    Reading:
+      type: object
+      required: [id, sensorId, ppm, measuredAt, severity]
+      properties:
+        id: { type: string, format: uuid }
+        sensorId: { type: string }
+        ppm: { type: number }
+        measuredAt: { type: string, format: date-time }
+        severity: { $ref: '#/components/schemas/Severity' }
+    Alert:
+      type: object
+      required: [id, sensorId, severity, status, peakPpm, readingsCount, openedAt, lastReadingAt, acknowledgedAt, acknowledgedBy]
+      properties:
+        id: { type: string, format: uuid }
+        sensorId: { type: string }
+        severity: { type: string, enum: [attention, alarm] }
+        status: { type: string, enum: [open, acknowledged] }
+        peakPpm: { type: number }
+        readingsCount: { type: integer, minimum: 1 }
+        openedAt: { type: string, format: date-time }
+        lastReadingAt: { type: string, format: date-time }
+        acknowledgedAt: { type: [string, 'null'], format: date-time }
+        acknowledgedBy: { type: [string, 'null'] }
+    CreateReadingResponse:
+      type: object
+      required: [reading, alertAction, alert]
+      properties:
+        reading: { $ref: '#/components/schemas/Reading' }
+        alertAction:
+          type: string
+          enum: [none, opened, escalated, updated]
+        alert:
+          oneOf:
+            - $ref: '#/components/schemas/Alert'
+            - type: 'null'
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+        message: { type: string }
+        issues:
+          type: array
+          items:
+            type: object
+            properties:
+              path: { type: string }
+              message: { type: string }
+  responses:
+    ValidationError:
+      description: Requisição inválida
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
