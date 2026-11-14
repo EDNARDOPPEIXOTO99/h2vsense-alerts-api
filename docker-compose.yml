@@ -1,0 +1,47 @@
+# Sobe tudo com um comando:  docker compose up --build
+# Valores abaixo são padrões de DESENVOLVIMENTO LOCAL. Para mudar, crie um .env (veja .env.example).
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-h2vsense}
+      POSTGRES_USER: ${POSTGRES_USER:-h2vsense}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-h2vsense_local}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 3000
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DATABASE_URL: postgres://${POSTGRES_USER:-h2vsense}:${POSTGRES_PASSWORD:-h2vsense_local}@db:5432/${POSTGRES_DB:-h2vsense}
+      ATTENTION_PCT_LEL: ${ATTENTION_PCT_LEL:-10}
+      ALARM_PCT_LEL: ${ALARM_PCT_LEL:-25}
+    ports:
+      - "${API_PORT:-3000}:3000"
+
+  # Opcional: docker compose --profile observability up --build
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    profiles: ["observability"]
+    volumes:
+      - ./ops/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    depends_on:
+      - api
+
+volumes:
+  pgdata:
