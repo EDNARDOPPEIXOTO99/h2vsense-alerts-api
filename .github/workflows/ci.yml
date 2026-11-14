@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    name: install · lint · test
+    runs-on: ubuntu-latest
+
+    # Postgres real para o teste de integração.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: h2vsense_test
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci -d h2vsense_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      NODE_ENV: test
+      LOG_LEVEL: silent
+      # Credencial descartável do container de teste do CI (não é segredo de nenhum ambiente).
+      DATABASE_URL: postgres://ci:ci@localhost:5432/h2vsense_test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint -- --max-warnings=0
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test + coverage (mínimo declarado em vitest.config.ts)
+        run: npm run test:coverage
+
+      - name: Build
+        run: npm run build
+
+      - name: Coverage no resumo da execução
+        if: always()
+        run: |
+          echo "### Coverage" >> "$GITHUB_STEP_SUMMARY"
+          node -e "const s=require('./coverage/coverage-summary.json').total;for(const k of ['lines','statements','functions','branches'])console.log('- '+k+': '+s[k].pct+'%')" >> "$GITHUB_STEP_SUMMARY"
+
+  openapi:
+    name: lint do contrato OpenAPI
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npx --yes @stoplight/spectral-cli@6 lint docs/openapi.yaml --fail-severity=warn
+
+  secrets:
+    name: varredura de segredos
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
